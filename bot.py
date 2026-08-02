@@ -206,7 +206,13 @@ def button_handler(update: Update, context: CallbackContext):
             status = "✅ USED" if num["number"] in current_data["used_otps"] else "🟢 AVAILABLE"
             text += f"{i}. <code>{num['number']}</code>\n   OTP: <code>{num['otp']}</code> | {status}\n\n"
         
-        query.edit_message_text(text, parse_mode='HTML')
+        # Split if too long
+        if len(text) > 4000:
+            for i in range(0, len(text), 4000):
+                query.message.reply_text(text[i:i+4000], parse_mode='HTML')
+            query.edit_message_text("📋 Full list sent above.", parse_mode='HTML')
+        else:
+            query.edit_message_text(text, parse_mode='HTML')
         return
     
     if data == "delete_all":
@@ -264,8 +270,9 @@ def file_handler(update: Update, context: CallbackContext):
     
     lines = content.strip().split('\n')
     new_numbers = []
+    errors = []
     
-    for line in lines:
+    for i, line in enumerate(lines, 1):
         if '|' in line:
             parts = line.split('|')
             if len(parts) >= 3:
@@ -274,6 +281,15 @@ def file_handler(update: Update, context: CallbackContext):
                     "otp": parts[1].strip(),
                     "password": parts[2].strip()
                 })
+            else:
+                errors.append(f"Line {i}: Invalid format")
+        else:
+            errors.append(f"Line {i}: Missing '|'")
+    
+    if errors:
+        error_text = "❌ <b>Errors found:</b>\n\n" + "\n".join(errors[:5])
+        update.message.reply_text(error_text, parse_mode='HTML')
+        return
     
     current_data = load_data()
     current_data["numbers"].extend(new_numbers)
@@ -281,11 +297,15 @@ def file_handler(update: Update, context: CallbackContext):
     
     update.message.reply_text(
         f"✅ <b><font color='#00FF00'>Uploaded {len(new_numbers)} numbers!</font></b>\n\n"
-        f"📊 Total: {len(current_data['numbers'])}",
+        f"📊 Total: {len(current_data['numbers'])}\n"
+        f"🟢 Available: {len([n for n in current_data['numbers'] if n['number'] not in current_data['used_otps']])}",
         parse_mode='HTML'
     )
     
     context.user_data['waiting_for_file'] = False
+
+def error_handler(update, context):
+    logger.error(f"Update {update} caused error {context.error}")
 
 def main():
     print("🤖 Bot is starting...")
@@ -296,6 +316,7 @@ def main():
     dp.add_handler(CommandHandler("start", start))
     dp.add_handler(CallbackQueryHandler(button_handler))
     dp.add_handler(MessageHandler(Filters.document, file_handler))
+    dp.add_error_handler(error_handler)
     
     print("🚀 Bot is running...")
     updater.start_polling()
